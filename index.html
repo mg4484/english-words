@@ -1047,29 +1047,89 @@ function vSentences(app) {
   app.append(card);
 }
 
-/* ---------- test ---------- */
-let Q = null, testN = 10;
+/* ---------- test: quick (words only) or full (words, spelling, sentences, reading) ---------- */
+const TIER_IDX = { easy: 0, medium: 1, hard: 2 };
+const FULL_SPEC = { easy: { w: 5, sp: 3, sen: 3 }, medium: { w: 6, sp: 4, sen: 3 }, hard: { w: 6, sp: 5, sen: 3 } };
+const SEC_NAME = { words: 'תרגום מילים', spell: 'כתיבה באנגלית', sen: 'משפטים', read: 'קטע קריאה' };
+const hasSentence = w => Array.isArray(w.ex) && w.ex.some(e => e && String(e[0]).includes('___'));
+let Q = null, testN = 10, testBusy = false;
+function senQuestion(area, w, finish) {
+  const ex = w.ex[TIER_IDX[S.level]] && String(w.ex[TIER_IDX[S.level]][0]).includes('___') ? w.ex[TIER_IDX[S.level]] : w.ex.find(e => e && String(e[0]).includes('___'));
+  const s = String(ex[0]), heS = String(ex[1] || ''), cut = s.indexOf('___');
+  const pre = s.slice(0, cut), post = s.slice(cut + 3);
+  const blank = h('span', { class: 'blank' }, '?');
+  const grid = h('div', { class: 'opts' });
+  shuffle([w.en, ...distractors(w, 3, 'en')]).forEach(o => grid.append(h('button', { class: 'opt en', dir: 'ltr', onclick: e => {
+    const ok = normEn(o) === normEn(w.en);
+    grid.querySelectorAll('button').forEach(b => { b.disabled = true; if (normEn(b.textContent) === normEn(w.en)) b.classList.add('ok'); });
+    if (!ok) e.currentTarget.classList.add('bad');
+    blank.textContent = w.en; blank.classList.add(ok ? 'ok' : 'bad');
+    speak(pre + w.en + post);
+    if (heS) area.append(h('div', { class: 'hint' }, heS));
+    finish(ok);
+  } }, o)));
+  area.append(h('div', { class: 'qlabel' }, 'איזו מילה חסרה?'), h('div', { class: 'sentence en', dir: 'ltr' }, pre, blank, post), grid);
+}
+function testReadingQ(area, rd, onSubmit, next) {
+  let speakingT = false;
+  const sb = h('button', { class: 'speak', onclick: () => { if (speakingT) { speechSynthesis.cancel(); speakingT = false; sb.textContent = '🔊 הקראת הקטע'; return; } speak(rd.x); speakingT = true; sb.textContent = '⏹ עצירה'; } }, '🔊 הקראת הקטע');
+  const ans = { mc: rd.mc.map(() => null), op: rd.op.map(() => '') };
+  const mcBoxes = [], opBoxes = [];
+  area.append(h('h2', { class: 'en', style: 'text-align:left;margin-top:6px' }, rd.t), h('div', { style: 'margin-bottom:8px' }, sb), h('div', { class: 'passage' }, rd.x));
+  rd.mc.forEach((q, i) => {
+    const box = h('div', { class: 'qcard' }, h('div', { class: 'qtext' }, `${i + 1}. ${q.q}`));
+    q.o.forEach((o, j) => box.append(h('button', { class: 'mco', onclick: () => { ans.mc[i] = j; box.querySelectorAll('.mco').forEach((b, x) => b.classList.toggle('sel', x === j)); } }, `${'abcd'[j]}. ${o}`)));
+    mcBoxes.push(box); area.append(box);
+  });
+  rd.op.forEach((q, i) => {
+    const ta = h('textarea', { class: 'in ans', placeholder: 'Write your answer in a full sentence…', oninput: e => ans.op[i] = e.target.value });
+    const box = h('div', { class: 'qcard' }, h('div', { class: 'qtext' }, `${rd.mc.length + i + 1}. ${q.q}`), ta);
+    opBoxes.push(box); area.append(box);
+  });
+  const st = h('div');
+  const sub = h('button', { class: 'btn ok block', style: 'margin-top:10px' }, 'סיום הקטע');
+  sub.onclick = async () => {
+    const m = ans.mc.findIndex(x => x == null); if (m >= 0) return toast(`לא ענית על שאלה ${m + 1}`);
+    const o = ans.op.findIndex(x => !x.trim()); if (o >= 0) return toast(`לא ענית על שאלה ${rd.mc.length + o + 1}`);
+    sub.remove(); area.querySelectorAll('.mco,textarea').forEach(x => x.disabled = true);
+    rd.mc.forEach((q, i) => mcBoxes[i].querySelectorAll('.mco').forEach((b, j) => { if (j === q.a) b.classList.add('ok'); else if (j === ans.mc[i]) b.classList.add('bad'); }));
+    st.replaceChildren(h('div', { class: 'spinner' }));
+    const res = await onSubmit({ mc: ans.mc, op: ans.op.map(x => x.trim()), at: Date.now() });
+    st.replaceChildren();
+    if (res.fb) res.fb.items.forEach((f, i) => opBoxes[i].append(
+      h('div', { style: 'margin-top:6px' }, h('span', { class: 'badge ' + (f.s >= 1 ? 'ok' : f.s > 0 ? 'mid' : 'bad') }, f.s >= 1 ? 'נכון' : f.s > 0 ? 'חלקית' : 'לא נכון'), ' ', f.f || ''),
+      f.c ? h('div', { class: 'model' }, '✏️ ', f.c) : ''));
+    else if (res.pending) opBoxes.forEach(b => b.append(h('div', { class: 'badge mid', style: 'margin-top:6px' }, 'נשלח לבדיקה של אבא')));
+    next(res);
+  };
+  area.append(sub, st);
+}
 function vTest(app) {
   if (needWords(app, 2, 'לעשות מבחן')) return;
   if (!Q) { testStart(app); return; }
   if (Q.i >= Q.items.length) { testEnd(app); return; }
-  const { w, t } = Q.items[Q.i];
-  const enToHe = t.endsWith('en_he');
+  const it = Q.items[Q.i], w = it.w;
+  const pct = Q.max ? Math.round(Q.pts / Q.max * 100) : 0;
   const card = h('div', { class: 'card' },
-    h('div', { class: 'scorebar' }, h('span', {}, `שאלה ${Q.i + 1} מתוך ${Q.items.length}`), h('span', {}, `ציון: ${Q.ok}`)),
-    h('div', { class: 'progress' }, h('i', { style: `width:${Q.i / Q.items.length * 100}%` })),
-    h('div', { class: 'qlabel' }, enToHe ? 'מה התרגום לעברית?' : 'איך אומרים באנגלית?'),
-    enToHe ? h('div', { class: 'bigword en' }, w.en) : h('div', { class: 'bigword he' }, w.he.split(/[,;\/]/)[0].trim()));
-  if (enToHe) card.append(h('div', { class: 'center' }, speakBtn(w.en)));
+    h('div', { class: 'scorebar' }, h('span', {}, `${Q.full ? SEC_NAME[it.sec] + ' · ' : ''}שאלה ${Q.i + 1} מתוך ${Q.items.length}`), h('span', {}, Q.max ? `ציון: ${pct}%` : '')),
+    h('div', { class: 'progress' }, h('i', { style: `width:${Q.i / Q.items.length * 100}%` })));
   const area = h('div'); card.append(area);
+  const nextBtn = () => { const nx = h('button', { class: 'btn block', style: 'margin-top:14px', onclick: () => { Q.i++; window.scrollTo(0, 0); render(); } }, Q.i + 1 < Q.items.length ? (Q.full && Q.items[Q.i + 1].sec !== it.sec ? `לחלק הבא: ${SEC_NAME[Q.items[Q.i + 1].sec]} ←` : 'לשאלה הבאה ←') : 'לציון 🏆'); area.append(nx); nx.focus(); };
+  if (it.t === 'read') {
+    testReadingQ(area, it.rd, ans => kidReadSubmit(it, ans), res => { Q.pts += res.pts; Q.max += res.max; Q.pend += res.pending || 0; nextBtn(); });
+    app.append(card); return;
+  }
   const finish = ok => {
-    if (ok) Q.ok++; else Q.wrong.push(w);
-    area.append(h('div', { class: 'fb ' + (ok ? 'ok' : 'bad') }, ok ? 'נכון!' : 'התשובה:', ok ? null : h('span', { class: 'ans' + (enToHe ? '' : ' en') }, enToHe ? w.he : w.en)));
-    const nx = h('button', { class: 'btn block', style: 'margin-top:14px', onclick: () => { Q.i++; render(); } }, Q.i + 1 < Q.items.length ? 'לשאלה הבאה ←' : 'לציון 🏆');
-    area.append(nx); nx.focus();
-    bump(w, ok);
+    Q.max++; if (ok) Q.pts++; else Q.wrong.push(w);
+    if (it.t !== 'sen') area.append(h('div', { class: 'fb ' + (ok ? 'ok' : 'bad') }, ok ? 'נכון!' : 'התשובה:', ok ? null : h('span', { class: 'ans' + (it.t.endsWith('en_he') ? '' : ' en') }, it.t.endsWith('en_he') ? w.he : w.en)));
+    nextBtn(); bump(w, ok);
   };
-  if (t.startsWith('mc')) {
+  if (it.t === 'sen') { senQuestion(area, w, finish); app.append(card); return; }
+  const enToHe = it.t.endsWith('en_he');
+  area.append(h('div', { class: 'qlabel' }, enToHe ? 'מה התרגום לעברית?' : it.t === 'gap_he_en' ? 'איך כותבים באנגלית?' : 'איך אומרים באנגלית?'),
+    enToHe ? h('div', { class: 'bigword en' }, w.en) : h('div', { class: 'bigword he' }, w.he.split(/[,;\/]/)[0].trim()));
+  if (enToHe) area.append(h('div', { class: 'center' }, speakBtn(w.en)));
+  if (it.t.startsWith('mc')) {
     const right = enToHe ? w.he.split(/[,;\/]/)[0].trim() : w.en;
     const grid = h('div', { class: 'opts' });
     shuffle([right, ...distractors(w, 3, enToHe ? 'he' : 'en')]).forEach(o => grid.append(h('button', { class: 'opt' + (enToHe ? '' : ' en'), dir: enToHe ? 'rtl' : 'ltr', onclick: e => {
@@ -1079,42 +1139,76 @@ function vTest(app) {
       finish(o === right);
     } }, o)));
     area.append(grid);
-  } else if (t === 'gap_he_en') gapAnswer(area, w, finish);
+  } else if (it.t === 'gap_he_en') gapAnswer(area, w, finish);
   else typedAnswer(area, w, !enToHe, false, ok => { if (!enToHe) speak(w.en); finish(ok); }, !enToHe);
   app.append(card);
 }
 function testStart(app) {
-  const max = S.words.length;
+  const all = S.words;
+  const max = all.length;
   const sizes = [5, 10, 15, 20].filter(n => n <= max);
   if (!sizes.length || (sizes[sizes.length - 1] < max && max < 20)) sizes.push(max);
   if (!sizes.includes(testN)) testN = sizes.includes(10) ? 10 : sizes[sizes.length - 1];
   const fmt = ts => { const d = new Date(ts); return `${d.getDate()}/${d.getMonth() + 1}`; };
+  const sp = FULL_SPEC[S.level], nSen = Math.min(sp.sen, all.filter(hasSentence).length);
+  const st = h('div');
+  const fullBtn = h('button', { class: 'btn acc block', disabled: testBusy }, '📝 מתחילים מבחן מלא');
+  fullBtn.onclick = async () => {
+    testBusy = true; fullBtn.disabled = true;
+    st.replaceChildren(h('div', { class: 'spinner' }), h('div', { class: 'center' }, 'מכין את המבחן…'));
+    try { Q = await buildFullTest(); } catch { toast('לא הצלחנו להכין את המבחן'); }
+    testBusy = false; render();
+  };
   app.append(h('div', { class: 'card center' },
-    h('div', { style: 'font-size:54px' }, '🏆'), h('h2', {}, 'מבחן מילים'),
-    h('p', { class: 'sub' }, `${gradeName(S.grade)} · ${LEVELS[S.level].desc}`),
-    h('label', { class: 'lbl' }, 'כמה שאלות?'),
-    h('div', { class: 'seg', style: 'margin-bottom:16px' }, sizes.map(n => h('button', { class: testN === n ? 'on' : '', onclick: () => { testN = n; render(); } }, String(n)))),
-    h('button', { class: 'btn acc block', onclick: () => { Q = buildTest(testN); render(); } }, 'מתחילים!')));
-  if (S.scores.length) app.append(h('div', { class: 'card' }, h('h2', {}, 'מבחנים קודמים'),
-    S.scores.slice(0, 8).map(s => h('div', { class: 'hist' }, h('span', {}, `${fmt(s.at)} · ${s.grade ? gradeName(s.grade) : (LEVELS[s.level]?.name || '')}`),
-      h('b', {}, `${s.score}/${s.total} (${Math.round(s.score / s.total * 100)}%)`)))));
+    h('div', { style: 'font-size:54px' }, '🏆'),
+    h('h2', {}, 'מבחן מלא'),
+    h('p', { class: 'sub' }, `${gradeName(S.grade)} · ${Math.min(sp.w, max)} תרגום מילים · ${Math.min(sp.sp, max)} כתיבה באנגלית${nSen ? ` · ${nSen} משפטים` : ''} · ${(getReads().some(r => !r.ans) ? 'קטע קריאה' : 'בלי קטע קריאה (אין קטע חדש, אפשר לבקש מאבא)')}`),
+    fullBtn, st));
+  app.append(h('div', { class: 'card center' },
+    h('h2', {}, 'מבחן מילים מהיר'),
+    h('div', { class: 'seg', style: 'margin-bottom:12px' }, sizes.map(n => h('button', { class: testN === n ? 'on' : '', onclick: () => { testN = n; render(); } }, String(n)))),
+    h('button', { class: 'btn sec block', onclick: () => { Q = buildTest(testN); render(); } }, `מבחן של ${testN} מילים`)));
+  const myScores = S.scores.filter(s => !S.kid || !s.kid || s.kid === S.kid);
+  if (myScores.length) app.append(h('div', { class: 'card' }, h('h2', {}, 'מבחנים קודמים'),
+    myScores.slice(0, 8).map(s => h('div', { class: 'hist' },
+      h('span', {}, `${fmt(s.at)} · ${s.full ? 'מלא' : 'מילים'} · ${s.grade ? gradeName(s.grade) : (LEVELS[s.level]?.name || '')}`),
+      h('b', {}, `${Math.round(s.score / s.total * 100)}%`)))));
 }
+const newQ = full => ({ i: 0, pts: 0, max: 0, pend: 0, wrong: [], full, level: S.level, grade: S.grade, kid: S.kid, items: [] });
+function wordTypes(mcOk, kinds) { return t => (!mcOk && t.startsWith('mc')) ? t.replace('mc', 'type') : t; }
 function buildTest(n) {
-  const mcOk = S.words.length >= 4;
+  const q = newQ(false), mcOk = S.words.length >= 4, fix = wordTypes(mcOk);
   const types = { easy: ['mc_en_he', 'mc_he_en', 'gap_he_en'], medium: ['mc_en_he', 'type_en_he', 'mc_he_en', 'gap_he_en'], hard: ['type_en_he', 'type_he_en'] }[S.level];
-  return { i: 0, ok: 0, wrong: [], level: S.level, grade: S.grade, items: pickWords(Math.min(n, S.words.length)).map(w => {
-    let t = types[Math.floor(Math.random() * types.length)];
-    if (!mcOk && t.startsWith('mc')) t = t.replace('mc', 'type');
-    return { w, t };
-  }) };
+  q.items = pickWords(Math.min(n, S.words.length)).map(w => ({ sec: 'words', w, t: fix(types[Math.floor(Math.random() * types.length)]) }));
+  return q;
+}
+async function buildFullTest() {
+  const q = newQ(true), sp = FULL_SPEC[S.level], all = S.words, mcOk = all.length >= 4, fix = wordTypes(mcOk);
+  const tr = { easy: ['mc_en_he', 'mc_he_en'], medium: ['mc_en_he', 'type_en_he', 'mc_he_en'], hard: ['type_en_he', 'mc_he_en'] }[S.level];
+  const used = new Set();
+  const take = (n, pool) => { const ws = pickWords(n, null, (pool || all).filter(w => !used.has(w.id))); ws.forEach(w => used.add(w.id)); return ws; };
+  take(Math.min(sp.w, all.length), all).forEach(w => q.items.push({ sec: 'words', w, t: fix(tr[Math.floor(Math.random() * tr.length)]) }));
+  let spl = take(sp.sp); if (!spl.length) spl = pickWords(Math.min(sp.sp, all.length));
+  spl.forEach(w => q.items.push({ sec: 'spell', w, t: S.level === 'hard' ? 'type_he_en' : 'gap_he_en' }));
+  let sen = take(sp.sen, all.filter(hasSentence)); if (!sen.length) sen = pickWords(sp.sen, null, all.filter(hasSentence));
+  sen.forEach(w => q.items.push({ sec: 'sen', w, t: 'sen' }));
+  const r = await kidTestReading();
+  if (r) q.items.push({ sec: 'read', t: 'read', rd: r.rd, id: r.id });
+  return q;
 }
 function testEnd(app) {
-  if (!Q.saved) { Q.saved = true; S.scores = [{ score: Q.ok, total: Q.items.length, level: Q.level, grade: Q.grade, at: Date.now() }, ...S.scores].slice(0, 30); LS.set('scores_' + S.kid, S.scores); }
-  const pct = Math.round(Q.ok / Q.items.length * 100);
+  const pct = Q.max ? Math.round(Q.pts / Q.max * 100) : 0;
+  if (!Q.saved) { Q.saved = true; kidSaveScore({ score: Math.round(Q.pts * 10) / 10, total: Q.max || 1, full: Q.full, level: Q.level, grade: Q.grade, ...(Q.kid ? { kid: Q.kid } : {}), at: Date.now() }); }
   const stars = pct >= 90 ? '⭐⭐⭐' : pct >= 70 ? '⭐⭐' : pct >= 40 ? '⭐' : '💪';
   const msg = pct === 100 ? 'מושלם! כל הכבוד! 🎉' : pct >= 80 ? 'מצוין!' : pct >= 60 ? 'יפה מאוד, ממשיכים להתאמן' : 'עוד קצת תרגול ונצליח!';
-  app.append(h('div', { class: 'card center' }, h('div', { class: 'stars' }, stars), h('div', { class: 'result' }, `${pct}%`),
-    h('p', { class: 'sub' }, `${Q.ok} תשובות נכונות מתוך ${Q.items.length}`), h('h2', {}, msg)));
+  const secs = Q.full ? ['words', 'spell', 'sen', 'read'].map(sname => {
+    const its = Q.items.filter(x => x.sec === sname); if (!its.length) return null;
+    return h('span', { class: 'tag', style: 'margin:2px' }, `${SEC_NAME[sname]}: ${its.length}`);
+  }) : null;
+  app.append(h('div', { class: 'card center' },
+    h('div', { class: 'stars' }, stars), h('div', { class: 'result' }, `${pct}%`),
+    h('p', { class: 'sub' }, `${Math.round(Q.pts * 10) / 10} נקודות מתוך ${Q.max}`), secs ? h('div', { class: 'chips', style: 'justify-content:center;gap:6px;margin:4px 0 8px' }, secs) : null, h('h2', {}, msg)));
+  if (Q.pend) app.append(h('div', { class: 'card center' }, h('p', { class: 'sub', style: 'margin:0 0 10px' }, `את ${Q.pend} השאלות הפתוחות בקטע הקריאה אבא ו-Claude יבדקו`), h('button', { class: 'btn ok block', onclick: sendAnswersToDad }, '📎 שליחת התשובות לאבא')));
   if (Q.wrong.length) app.append(h('div', { class: 'card' }, h('h2', {}, 'מילים לחזור עליהן'),
     h('ul', { class: 'wlist' }, Q.wrong.map(w => h('li', { class: 'witem' },
       h('button', { class: 'mini', onclick: () => speak(w.en) }, '🔊'),
@@ -1123,6 +1217,14 @@ function testEnd(app) {
     h('button', { class: 'btn sec grow', onclick: () => go('home') }, 'לדף הבית'),
     h('button', { class: 'btn grow', onclick: () => { Q = null; render(); } }, 'מבחן נוסף')));
 }
+// reading section on the kids' phone: a passage she hasn't answered yet; open answers go to Dad for checking
+function kidTestReading() { const it = getReads().find(r => !r.ans); return it ? { rd: it.rd, id: it.rd.id } : null; }
+async function kidReadSubmit(it, ans) {
+  const rd = it.rd, list = getReads(), e = list.find(r => r.rd.id === rd.id);
+  if (e) { e.ans = ans; delete e.draft; setReads(list); }
+  return { pts: rd.mc.filter((q, i) => ans.mc[i] === q.a).length, max: rd.mc.length, pending: rd.op.length };
+}
+function kidSaveScore(sc) { S.scores = [sc, ...S.scores].slice(0, 30); LS.set('scores_' + S.kid, S.scores); }
 
 /* ---------- start ---------- */
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch { }
