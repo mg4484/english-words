@@ -115,6 +115,13 @@ label.btn{display:block;text-align:center}
 h2{font-size:18px;margin:0 0 10px}
 .kidtag{font-size:12px;color:var(--pri);background:var(--pri2);padding:1px 8px;border-radius:99px;margin-inline-start:6px;white-space:nowrap}
 .gift{font-size:60px;text-align:center}
+.gap{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;margin:14px 0;direction:ltr}
+.gl{min-width:19px;height:46px;display:grid;place-items:center;font-size:26px;font-weight:700}
+.gl.sp{min-width:14px}
+.gi{width:33px;height:46px;border:2px solid var(--pri);border-radius:10px;text-align:center;font-size:26px;font-weight:700;background:var(--pri2);color:var(--pri);padding:0;outline:none}
+.gi:focus{box-shadow:0 0 0 3px rgba(91,79,224,.25)}
+.gi.ok{border-color:var(--ok);background:var(--ok2);color:#15734C}
+.gi.bad{border-color:var(--bad);background:var(--bad2);color:#B4232C}
 .chips{display:flex;gap:8px;flex-wrap:wrap}
 .chip{border:2px solid var(--line);background:#fff;border-radius:99px;padding:8px 16px;font-weight:600;cursor:pointer;font-size:16px}
 .chip.on{border-color:var(--pri);background:var(--pri2);color:var(--pri)}
@@ -297,14 +304,14 @@ function checkHash() {
 window.addEventListener('hashchange', () => { checkHash(); render(); });
 
 /* ---------- router ---------- */
-const TITLES = { kids: 'מי לומד/ת?', home: 'מילים באנגלית', bank: 'המילים שלי', add: 'הוספת מילים', practice: 'תרגול מילים', sentences: 'משפטים', test: 'מבחן', import: 'מילים חדשות!' };
+const TITLES = { kids: 'מי לומד/ת?', home: 'מילים באנגלית', bank: 'המילים שלי', add: 'הוספת מילים', practice: 'תרגול מילים', spell: 'כתיבה באנגלית', sentences: 'משפטים', test: 'מבחן', import: 'מילים חדשות!' };
 const PASSIVE = new Set(['home', 'bank']);
 function setGrade(g) {
   if (!GRADES[g]) return;
   S.grade = g; S.level = GRADES[g];
   S.kids = S.kids.map(k => k.id === S.kid ? { ...k, grade: g } : k); LS.set('kids', S.kids);
 }
-function go(view) { S.view = view; P = null; Q = null; SEN = null; preview = null; KED = null; window.scrollTo(0, 0); render(); }
+function go(view) { S.view = view; P = null; Q = null; SEN = null; SP = null; preview = null; KED = null; window.scrollTo(0, 0); render(); }
 $('#back').onclick = () => go('home');
 function render() {
   if (!S.kids.length && S.view !== 'import') S.view = 'kids';
@@ -313,7 +320,7 @@ function render() {
   $('#back').hidden = S.view === 'home' || !S.kids.length;
   $('#count').textContent = `${S.words.length} מילים`;
   const app = $('#app'); app.replaceChildren();
-  ({ kids: vKids, home: vHome, bank: vBank, add: vAdd, practice: vPractice, sentences: vSentences, test: vTest, import: vImport })[S.view](app);
+  ({ kids: vKids, home: vHome, bank: vBank, add: vAdd, practice: vPractice, spell: vSpell, sentences: vSentences, test: vTest, import: vImport })[S.view](app);
 }
 function needWords(app, n, what) {
   if (S.words.length >= n) return false;
@@ -346,9 +353,10 @@ function vHome(app) {
       h('div', { class: 'lvdesc' }, `${gradeName(S.grade)}: ${LEVELS[S.level].desc}`)),
     h('div', { class: 'tiles' },
       tile('🎯', 'תרגול מילים', 'מילה באנגלית, מה התרגום?', '#E9E6FF', 'practice'),
+      tile('✍️', 'כתיבה באנגלית', 'רואים בעברית, כותבים באנגלית', '#E0F4F7', 'spell'),
       tile('✏️', 'משפטים', 'השלימו את המילה החסרה', '#FFE6DC', 'sentences'),
       tile('🏆', 'מבחן', 'עם ציון בסוף', '#FFF1C7', 'test'),
-      tile('➕', 'הוספת מילים', 'הקלדה, תמונה או קובץ', '#DDF4E8', 'add'),
+      tile('➕', 'הוספת מילים', 'הקלדה, תמונה או קובץ', '#DDF4E8', 'add', true),
       tile('📚', 'המילים שלי', 'צפייה, עריכה ושיתוף', '#FFFFFF', 'bank', true))
   );
 }
@@ -679,6 +687,66 @@ function vPreview(app) {
       h('button', { class: 'btn sec', onclick: () => { preview = null; render(); } }, 'ביטול'), h('div', { class: 'grow' }, btn))));
 }
 
+/* ---------- spelling: the Hebrew word is shown, she writes the English ---------- */
+// grades ג׳–ו׳: fill in missing letters · grades ז׳–ט׳: write the whole word (exact spelling)
+function gapAnswer(area, w, finish) {
+  const word = w.en.trim();
+  const letters = [...word].map((c, i) => ({ c, i, isL: /[a-z]/i.test(c) }));
+  const cand = letters.filter(x => x.isL && x.i > 0);
+  const hide = new Set(shuffle(cand).slice(0, Math.max(1, Math.round(cand.length * (S.level === 'easy' ? 0.3 : 0.45)))).map(x => x.i));
+  if (!hide.size && letters[0] && letters[0].isL) hide.add(0);
+  const boxes = [];
+  const row = h('div', { class: 'gap', dir: 'ltr' }, letters.map(x => {
+    if (!hide.has(x.i)) return h('span', { class: 'gl' + (x.c === ' ' ? ' sp' : '') }, x.c === ' ' ? ' ' : x.c);
+    const b = h('input', { class: 'gi', maxlength: 2, autocomplete: 'off', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', 'aria-label': 'אות חסרה' });
+    b.dataset.ans = x.c.toLowerCase(); boxes.push(b); return b;
+  }));
+  boxes.forEach((b, j) => {
+    b.addEventListener('input', () => { b.value = b.value.replace(/[^a-z]/gi, '').slice(-1).toLowerCase(); if (b.value && boxes[j + 1]) boxes[j + 1].focus(); });
+    b.addEventListener('keydown', e => {
+      if (e.key === 'Backspace' && !b.value && boxes[j - 1]) { e.preventDefault(); boxes[j - 1].focus(); boxes[j - 1].value = ''; }
+      if (e.key === 'Enter') { e.preventDefault(); check(); }
+    });
+  });
+  const skip = h('button', { class: 'btn sec', type: 'button', onclick: () => done(false) }, 'לא יודע/ת');
+  const btns = h('div', { class: 'row', style: 'margin-top:12px' }, skip, h('button', { class: 'btn ok grow', type: 'button', onclick: () => check() }, 'בדיקה'));
+  function check() {
+    const empty = boxes.find(b => !b.value);
+    if (empty) { toast('השלימו את כל האותיות'); empty.focus(); return; }
+    done(boxes.every(b => b.value === b.dataset.ans));
+  }
+  function done(ok) {
+    boxes.forEach(b => { b.disabled = true; b.classList.add(b.value === b.dataset.ans ? 'ok' : 'bad'); if (b.value !== b.dataset.ans) b.value = b.dataset.ans; });
+    btns.remove(); speak(word); finish(ok);
+  }
+  area.append(h('div', { class: 'qlabel', style: 'margin-top:8px' }, 'השלימו את האותיות החסרות'), row, btns);
+  setTimeout(() => boxes[0] && boxes[0].focus(), 50);
+}
+let SP = null;
+function vSpell(app) {
+  if (needWords(app, 1, 'לתרגל')) return;
+  if (!SP) SP = { done: 0, ok: 0, streak: 0, last: null };
+  const w = pickWords(1, SP.last)[0] || S.words[0]; SP.last = w.id;
+  const full = S.level === 'hard';
+  const sb = h('span', {}, `נכון ${SP.ok} מתוך ${SP.done}`);
+  const area = h('div');
+  const next = h('button', { class: 'btn block', style: 'margin-top:14px', onclick: () => render() }, 'הבא ←');
+  const finish = ok => {
+    SP.done++; if (ok) { SP.ok++; SP.streak++; } else SP.streak = 0;
+    sb.textContent = `נכון ${SP.ok} מתוך ${SP.done}`;
+    area.append(h('div', { class: 'fb ' + (ok ? 'ok' : 'bad') }, ok ? (SP.streak >= 3 ? `מעולה! ${SP.streak} ברצף 🔥` : 'נכון! 🎉') : 'כך כותבים:', h('span', { class: 'ans en' }, w.en)),
+      h('div', { class: 'center', style: 'margin-top:8px' }, speakBtn(w.en)), next);
+    next.focus(); bump(w, ok);
+  };
+  app.append(h('div', { class: 'card' },
+    h('div', { class: 'scorebar' }, sb, h('span', { class: 'streak' }, SP.streak >= 2 ? `🔥 ${SP.streak} ברצף` : '')),
+    h('div', { class: 'qlabel' }, full ? 'כתבו את המילה באנגלית' : 'איך כותבים באנגלית?'),
+    h('div', { class: 'bigword he' }, w.he.split(/[,;\/]/)[0].trim()),
+    area));
+  if (full) typedAnswer(area, w, true, true, ok => { speak(w.en); finish(ok); }, true);
+  else gapAnswer(area, w, finish);
+}
+
 /* ---------- practice ---------- */
 let P = null;
 function vPractice(app) {
@@ -719,7 +787,8 @@ function vPractice(app) {
   } else typedAnswer(area, w, reverse, true, finish);
   app.append(card);
 }
-function typedAnswer(area, w, reverse, withHint, finish) {
+const exactEn = (a, w) => { const x = stripArt(normEn(a)); return !!x && x === stripArt(normEn(w.en)); };
+function typedAnswer(area, w, reverse, withHint, finish, strict) {
   const inp = h('input', { class: 'in' + (reverse ? ' en' : ''), dir: reverse ? 'ltr' : 'rtl', placeholder: reverse ? 'type in English' : 'כתבו בעברית', autocomplete: 'off', autocapitalize: 'off', style: 'margin-top:14px;font-size:20px;text-align:center' });
   const check = h('button', { class: 'btn ok grow', type: 'submit' }, 'בדיקה');
   const skip = h('button', { class: 'btn sec', type: 'button' }, 'לא יודע/ת');
@@ -734,8 +803,8 @@ function typedAnswer(area, w, reverse, withHint, finish) {
   }
   const row = h('div', { class: 'row', style: 'margin-top:12px' }, skip, check);
   form.append(row);
-  const done = ok => { inp.disabled = true; row.remove(); finish(ok); };
-  form.onsubmit = ev => { ev.preventDefault(); if (!inp.value.trim()) return inp.focus(); done(reverse ? enOk(inp.value, w) : heOk(inp.value, w)); };
+  const done = ok => { inp.disabled = true; row.remove(); form.querySelectorAll('.center').forEach(x => x.remove()); finish(ok); };
+  form.onsubmit = ev => { ev.preventDefault(); if (!inp.value.trim()) return inp.focus(); done(reverse ? (strict ? exactEn : enOk)(inp.value, w) : heOk(inp.value, w)); };
   skip.onclick = () => done(false);
   area.append(form);
   setTimeout(() => inp.focus(), 50);
@@ -812,7 +881,8 @@ function vTest(app) {
       finish(o === right);
     } }, o)));
     area.append(grid);
-  } else typedAnswer(area, w, !enToHe, false, ok => { if (!enToHe) speak(w.en); finish(ok); });
+  } else if (t === 'gap_he_en') gapAnswer(area, w, finish);
+  else typedAnswer(area, w, !enToHe, false, ok => { if (!enToHe) speak(w.en); finish(ok); }, !enToHe);
   app.append(card);
 }
 function testStart(app) {
@@ -833,7 +903,7 @@ function testStart(app) {
 }
 function buildTest(n) {
   const mcOk = S.words.length >= 4;
-  const types = { easy: ['mc_en_he', 'mc_he_en'], medium: ['mc_en_he', 'type_en_he', 'mc_he_en'], hard: ['type_en_he', 'type_he_en'] }[S.level];
+  const types = { easy: ['mc_en_he', 'mc_he_en', 'gap_he_en'], medium: ['mc_en_he', 'type_en_he', 'mc_he_en', 'gap_he_en'], hard: ['type_en_he', 'type_he_en'] }[S.level];
   return { i: 0, ok: 0, wrong: [], level: S.level, grade: S.grade, items: pickWords(Math.min(n, S.words.length)).map(w => {
     let t = types[Math.floor(Math.random() * types.length)];
     if (!mcOk && t.startsWith('mc')) t = t.replace('mc', 'type');
