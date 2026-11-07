@@ -115,6 +115,20 @@ label.btn{display:block;text-align:center}
 h2{font-size:18px;margin:0 0 10px}
 .kidtag{font-size:12px;color:var(--pri);background:var(--pri2);padding:1px 8px;border-radius:99px;margin-inline-start:6px;white-space:nowrap}
 .gift{font-size:60px;text-align:center}
+.passage{font-size:20px;line-height:1.75;direction:ltr;text-align:left;white-space:pre-wrap}
+.hl{background:#FFF1C7;border-bottom:2px solid var(--sun);border-radius:4px;cursor:pointer;padding:0 2px}
+.qcard{border-top:1px solid var(--line);padding:14px 0}
+.qcard:first-child{border-top:0}
+.qtext{direction:ltr;text-align:left;font-weight:600;font-size:18px;margin-bottom:10px}
+.mco{display:block;width:100%;text-align:left;direction:ltr;border:2px solid var(--line);background:#fff;border-radius:14px;padding:12px 14px;margin-bottom:8px;font-size:17px;cursor:pointer}
+.mco.sel{border-color:var(--pri);background:var(--pri2)}
+.mco.ok{border-color:var(--ok);background:var(--ok2)}
+.mco.bad{border-color:var(--bad);background:var(--bad2)}
+textarea.ans{direction:ltr;text-align:left;min-height:90px}
+.badge{display:inline-block;border-radius:99px;padding:2px 10px;font-size:13px;font-weight:700}
+.badge.ok{background:var(--ok2);color:#15734C}.badge.mid{background:#FFF1C7;color:#7A5B00}.badge.bad{background:var(--bad2);color:#B4232C}
+.model{direction:ltr;text-align:left;background:#F5F0E7;border-radius:12px;padding:10px 12px;margin-top:8px;font-size:15px}
+.rlist .witem{cursor:pointer}
 .gap{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;margin:14px 0;direction:ltr}
 .gl{min-width:19px;height:46px;display:grid;place-items:center;font-size:26px;font-weight:700}
 .gl.sp{min-width:14px}
@@ -154,7 +168,7 @@ function h(tag, attrs = {}, ...kids) {
     else if (k === 'checked') e.checked = !!v;
     else e.setAttribute(k, v === true ? '' : v);
   }
-  for (const c of kids.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  for (const c of kids.flat(Infinity)) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(String(c)));
   return e;
 }
 const LS = {
@@ -288,7 +302,7 @@ function decodePack(str) {
   const m = String(str).match(/pack=([A-Za-z0-9+\-$]+)/);
   const code = m ? m[1] : String(str).trim();
   const p = JSON.parse(LZString.decompressFromEncodedURIComponent(code) || 'null');
-  if (!p || !Array.isArray(p.w)) throw new Error('pack');
+  if (!p || !(Array.isArray(p.w) || p.rd || p.fb || p.ans)) throw new Error('pack');
   return p;
 }
 function encodePack(words, name, kid) {
@@ -304,14 +318,14 @@ function checkHash() {
 window.addEventListener('hashchange', () => { checkHash(); render(); });
 
 /* ---------- router ---------- */
-const TITLES = { kids: 'מי לומד/ת?', home: 'מילים באנגלית', bank: 'המילים שלי', add: 'הוספת מילים', practice: 'תרגול מילים', spell: 'כתיבה באנגלית', sentences: 'משפטים', test: 'מבחן', import: 'מילים חדשות!' };
+const TITLES = { kids: 'מי לומד/ת?', home: 'מילים באנגלית', bank: 'המילים שלי', add: 'הוספת מילים', practice: 'תרגול מילים', readings: 'קטעי קריאה', read: 'קטע קריאה', spell: 'כתיבה באנגלית', sentences: 'משפטים', test: 'מבחן', import: 'מילים חדשות!' };
 const PASSIVE = new Set(['home', 'bank']);
 function setGrade(g) {
   if (!GRADES[g]) return;
   S.grade = g; S.level = GRADES[g];
   S.kids = S.kids.map(k => k.id === S.kid ? { ...k, grade: g } : k); LS.set('kids', S.kids);
 }
-function go(view) { S.view = view; P = null; Q = null; SEN = null; SP = null; preview = null; KED = null; window.scrollTo(0, 0); render(); }
+function go(view) { S.view = view; P = null; Q = null; SEN = null; SP = null; preview = null; KED = null; try { speechSynthesis.cancel(); } catch { } window.scrollTo(0, 0); render(); }
 $('#back').onclick = () => go('home');
 function render() {
   if (!S.kids.length && S.view !== 'import') S.view = 'kids';
@@ -320,7 +334,7 @@ function render() {
   $('#back').hidden = S.view === 'home' || !S.kids.length;
   $('#count').textContent = `${S.words.length} מילים`;
   const app = $('#app'); app.replaceChildren();
-  ({ kids: vKids, home: vHome, bank: vBank, add: vAdd, practice: vPractice, spell: vSpell, sentences: vSentences, test: vTest, import: vImport })[S.view](app);
+  ({ kids: vKids, home: vHome, bank: vBank, add: vAdd, practice: vPractice, readings: vReadings, read: vRead, spell: vSpell, sentences: vSentences, test: vTest, import: vImport })[S.view](app);
 }
 function needWords(app, n, what) {
   if (S.words.length >= n) return false;
@@ -356,7 +370,8 @@ function vHome(app) {
       tile('✍️', 'כתיבה באנגלית', 'רואים בעברית, כותבים באנגלית', '#E0F4F7', 'spell'),
       tile('✏️', 'משפטים', 'השלימו את המילה החסרה', '#FFE6DC', 'sentences'),
       tile('🏆', 'מבחן', 'עם ציון בסוף', '#FFF1C7', 'test'),
-      tile('➕', 'הוספת מילים', 'הקלדה, תמונה או קובץ', '#DDF4E8', 'add', true),
+      tile('📖', 'קטעי קריאה', newReads() ? `${newReads()} חדשים מחכים לך!` : 'קוראים ועונים על שאלות', '#EDE7F6', 'readings'),
+      tile('➕', 'הוספת מילים', 'הקלדה, תמונה או קובץ', '#DDF4E8', 'add'),
       tile('📚', 'המילים שלי', 'צפייה, עריכה ושיתוף', '#FFFFFF', 'bank', true))
   );
 }
@@ -404,6 +419,15 @@ function vImport(app) {
     return;
   }
   if (!p) { go('home'); return; }
+  if (p.rd) { vImportReading(app, p); return; }
+  if (p.fb) { vImportFeedback(app, p); return; }
+  if (p.ans) {
+    app.append(h('div', { class: 'card center' }, h('div', { class: 'gift' }, '📝'),
+      h('h2', {}, `התשובות של ${(p.k && p.k.name) || ''}`),
+      h('p', { class: 'sub' }, 'הקישור הזה מיועד לאבא: מעתיקים את ההודעה ומדביקים אותה באפליקציה של אבא ב-Claude, במסך "קטעי קריאה" ← "בדיקת תשובות".'),
+      h('button', { class: 'btn block', onclick: () => { S.pack = null; go('home'); } }, 'הבנתי')));
+    return;
+  }
   const items = p.w.filter(x => Array.isArray(x) && typeof x[0] === 'string' && x[0].trim() && x[1]);
   const pk = p.k && String(p.k.name || '').trim() ? { name: String(p.k.name).trim(), grade: GRADES[p.k.grade] ? p.k.grade : 'ה' } : null;
   // whose words are these? match the name in the link, otherwise ask
@@ -685,6 +709,155 @@ function vPreview(app) {
     rows,
     h('div', { class: 'row', style: 'margin-top:14px' },
       h('button', { class: 'btn sec', onclick: () => { preview = null; render(); } }, 'ביטול'), h('div', { class: 'grow' }, btn))));
+}
+
+/* ---------- reading passages (written by Claude in Dad's app, checked there too) ---------- */
+// stored per kid: [{rd, addedAt, draft?, ans?, fb?}]
+// rd = {id, t: title, th: Hebrew title, x: text, g: grade, u: words used, mc: [{q, o, a}], op: [{q, m: model answer, kw: [[alternatives]]}]}
+const readsKey = id => 'reads_' + id;
+const getReads = (id = S.kid) => id ? LS.get(readsKey(id), []) : [];
+const setReads = (list, id = S.kid) => LS.set(readsKey(id), list);
+const newReads = () => getReads().filter(r => !r.ans).length;
+function kwCheck(ans, kw) {   // quick self-check before Dad's real check: are the key ideas there?
+  if (!kw || !kw.length) return null;
+  const a = ' ' + normEn(ans) + ' ', words = a.trim().split(' ');
+  const hit = g => g.some(alt => { alt = normEn(alt); if (!alt) return false; if (a.includes(' ' + alt + ' ') || a.includes(' ' + alt)) return true; return !alt.includes(' ') && alt.length >= 5 && words.some(x => lev(x, alt) <= 1); });
+  return kw.filter(hit).length / kw.length;
+}
+function vImportReading(app, p) {
+  const rd = p.rd;
+  const pk = p.k && String(p.k.name || '').trim() ? { name: String(p.k.name).trim(), grade: GRADES[p.k.grade] ? p.k.grade : 'ה' } : null;
+  if (p.target === undefined) {
+    const m = pk && S.kids.find(k => k.name === pk.name);
+    p.target = m ? m.id : (pk ? 'new' : (S.kid || (S.kids[0] && S.kids[0].id) || 'new'));
+  }
+  app.append(h('div', { class: 'card center' },
+    h('div', { class: 'gift' }, '📖'),
+    h('h2', {}, `${p.n || 'אבא'} שלח/ה קטע קריאה חדש${pk ? ' ל' + pk.name : ''}`),
+    h('p', { class: 'sub en' }, rd.t), rd.th ? h('p', { class: 'sub' }, rd.th) : null,
+    h('p', { class: 'sub' }, `${rd.mc.length} שאלות אמריקאיות · ${rd.op.length} שאלות פתוחות`),
+    h('div', { style: 'text-align:right' }, h('label', { class: 'lbl' }, 'למי?'),
+      h('div', { class: 'chips' },
+        S.kids.map(k => h('button', { class: 'chip' + (p.target === k.id ? ' on' : ''), onclick: () => { p.target = k.id; render(); } }, k.name)),
+        pk && !S.kids.some(k => k.name === pk.name) ? h('button', { class: 'chip' + (p.target === 'new' ? ' on' : ''), onclick: () => { p.target = 'new'; render(); } }, pk.name) : null)),
+    h('div', { class: 'row', style: 'margin-top:14px' },
+      h('button', { class: 'btn sec', onclick: () => { S.pack = null; S.view = S.kids.length ? 'home' : 'kids'; render(); } }, 'לא עכשיו'),
+      h('button', { class: 'btn grow', onclick: () => {
+        let tid = p.target;
+        if (tid === 'new') { if (!pk) return toast('בחרו למי'); tid = addKid(pk.name, pk.grade).id; }
+        useKid(tid);
+        const list = getReads();
+        if (!list.some(r => r.rd.id === rd.id)) { list.unshift({ rd, addedAt: Date.now() }); setReads(list); }
+        S.pack = null; S.readId = rd.id; go('read');
+      } }, 'לקטע ←'))));
+}
+function vImportFeedback(app, p) {
+  const fb = p.fb;
+  const kid = (p.k && S.kids.find(k => k.name === String(p.k.name || '').trim())) || curKid();
+  const list = kid ? getReads(kid.id) : [];
+  const it = list.find(r => r.rd.id === fb.r);
+  if (!it) {
+    app.append(h('div', { class: 'card center' }, h('div', { class: 'gift' }, '🤔'),
+      h('h2', {}, 'לא מצאנו את הקטע הזה'), h('p', { class: 'sub' }, 'המשוב שייך לקטע שלא נמצא בטלפון הזה.'),
+      h('button', { class: 'btn block', onclick: () => { S.pack = null; go('home'); } }, 'הבנתי')));
+    return;
+  }
+  it.fb = fb; setReads(list, kid.id); useKid(kid.id);
+  S.pack = null; S.readId = fb.r; toast('המשוב מאבא הגיע! ⭐'); go('read');
+}
+function vReadings(app) {
+  const list = getReads();
+  const k = curKid();
+  const ask = 'https://wa.me/?text=' + encodeURIComponent(`אבא, אפשר קטע קריאה חדש באנגלית? 📖 (${k ? k.name : ''})`);
+  app.append(h('a', { class: 'btn acc block', style: 'margin-bottom:14px', href: ask, target: '_blank', rel: 'noopener' }, '📩 בקשת קטע חדש מאבא'));
+  if (!list.length) { app.append(h('div', { class: 'card empty' }, h('span', { class: 'em' }, '📖'), 'עוד אין קטעי קריאה. אבא שולח אותם בקישור.')); return; }
+  const status = r => r.fb ? h('span', { class: 'badge ' + (r.fb.sc >= 80 ? 'ok' : r.fb.sc >= 55 ? 'mid' : 'bad') }, `⭐ ${r.fb.sc}%`)
+    : r.ans ? h('span', { class: 'badge mid' }, 'ממתין לבדיקה') : h('span', { class: 'badge ok' }, 'חדש');
+  app.append(h('div', { class: 'card' }, h('ul', { class: 'wlist rlist' }, list.map(r => h('li', { class: 'witem', onclick: () => { S.readId = r.rd.id; go('read'); } },
+    h('div', { class: 'w' }, h('b', { class: 'en' }, r.rd.t), h('span', {}, r.rd.th || '')), status(r))))));
+}
+let speaking = false;
+function vRead(app) {
+  const list = getReads(), it = list.find(r => r.rd.id === S.readId);
+  if (!it) { go('readings'); return; }
+  const rd = it.rd, done = !!it.ans;
+  const save = () => setReads(list);
+  // words from her bank (and the words Dad's passage used) are marked: tap to hear + see the meaning
+  const bank = new Map();
+  S.words.forEach(w => bank.set(w.en.toLowerCase(), w));
+  const tokens = rd.x.split(/([A-Za-z][A-Za-z']*)/);
+  const passage = h('div', { class: 'passage' }, tokens.map(tok => {
+    const w = bank.get(tok.toLowerCase());
+    return w ? h('span', { class: 'hl', onclick: () => { speak(w.en); toast(`${w.en} = ${w.he}`); } }, tok) : tok;
+  }));
+  const sb = h('button', { class: 'speak', onclick: () => {
+    if (speaking) { speechSynthesis.cancel(); speaking = false; sb.textContent = '🔊 הקראת הקטע'; return; }
+    speak(rd.x); speaking = true; sb.textContent = '⏹ עצירה';
+  } }, '🔊 הקראת הקטע');
+  app.append(h('div', { class: 'card' },
+    it.fb ? h('div', { class: 'fb ' + (it.fb.sc >= 60 ? 'ok' : 'bad'), style: 'margin:0 0 14px' }, `ציון: ${it.fb.sc}%`, it.fb.o ? h('span', { style: 'display:block;font-weight:500;margin-top:4px' }, it.fb.o) : null) : null,
+    h('h2', { class: 'en', style: 'text-align:left' }, rd.t), rd.th ? h('p', { class: 'sub', style: 'margin:-6px 0 8px' }, rd.th) : null,
+    h('div', { style: 'margin-bottom:10px' }, sb), passage));
+
+  const draft = it.draft || (it.draft = { mc: rd.mc.map(() => null), op: rd.op.map(() => '') });
+  const ans = it.ans || draft;
+  const qs = h('div', { class: 'card' }, h('h2', {}, 'שאלות'));
+  rd.mc.forEach((q, i) => {
+    const box = h('div', { class: 'qcard' }, h('div', { class: 'qtext' }, `${i + 1}. ${q.q}`));
+    q.o.forEach((o, j) => {
+      let cls = 'mco';
+      if (done) { if (j === q.a) cls += ' ok'; else if (ans.mc[i] === j) cls += ' bad'; }
+      else if (draft.mc[i] === j) cls += ' sel';
+      box.append(h('button', { class: cls, disabled: done, onclick: () => { draft.mc[i] = j; save(); box.querySelectorAll('.mco').forEach((b, x) => b.classList.toggle('sel', x === j)); } }, `${'abcd'[j] || '-'}. ${o}`));
+    });
+    qs.append(box);
+  });
+  rd.op.forEach((q, i) => {
+    const n = rd.mc.length + i + 1;
+    const box = h('div', { class: 'qcard' }, h('div', { class: 'qtext' }, `${n}. ${q.q}`));
+    if (!done) {
+      box.append(h('textarea', { class: 'in ans', placeholder: 'Write your answer in a full sentence…', autocapitalize: 'sentences', oninput: e => { draft.op[i] = e.target.value; save(); } }, draft.op[i] || ''));
+    } else {
+      box.append(h('div', { class: 'model', style: 'background:#fff;border:2px solid var(--line)' }, ans.op[i] || '—'));
+      const f = it.fb && it.fb.items && it.fb.items[i];
+      if (f) {
+        box.append(h('div', { style: 'margin-top:8px' }, h('span', { class: 'badge ' + (f.s >= 1 ? 'ok' : f.s > 0 ? 'mid' : 'bad') }, f.s >= 1 ? 'נכון ✓' : f.s > 0 ? 'חלקית' : 'לא נכון'), ' ', f.f || ''));
+        if (f.c) box.append(h('div', { class: 'model' }, '✏️ ', f.c));
+      } else {
+        const k = kwCheck(ans.op[i] || '', q.kw);
+        if (k != null) box.append(h('div', { style: 'margin-top:8px' }, h('span', { class: 'badge ' + (k >= 0.7 ? 'ok' : k >= 0.35 ? 'mid' : 'bad') }, k >= 0.7 ? 'בדיקה ראשונית: נראה טוב' : k >= 0.35 ? 'בדיקה ראשונית: חסר משהו' : 'בדיקה ראשונית: כדאי לבדוק שוב')));
+        if (q.m) box.append(h('div', { class: 'model' }, 'תשובה לדוגמה: ', q.m));
+      }
+    }
+    qs.append(box);
+  });
+  app.append(qs);
+
+  if (!done) {
+    app.append(h('button', { class: 'btn ok block', onclick: () => {
+      const miss = draft.mc.findIndex(x => x == null);
+      if (miss >= 0) return toast(`לא ענית על שאלה ${miss + 1}`);
+      const missO = draft.op.findIndex(x => !String(x || '').trim());
+      if (missO >= 0) return toast(`לא ענית על שאלה ${rd.mc.length + missO + 1}`);
+      it.ans = { mc: [...draft.mc], op: draft.op.map(x => x.trim()), at: Date.now() };
+      delete it.draft; save();
+      const ok = rd.mc.filter((q, i) => it.ans.mc[i] === q.a).length;
+      toast(`אמריקאיות: ${ok} מתוך ${rd.mc.length} נכונות`); window.scrollTo(0, 0); render();
+    } }, 'הגשה'));
+    return;
+  }
+  const ok = rd.mc.filter((q, i) => ans.mc[i] === q.a).length;
+  if (!it.fb) {
+    const k = curKid();
+    const link = location.origin + location.pathname + '#pack=' + LZString.compressToEncodedURIComponent(JSON.stringify({ v: 1, n: k ? k.name : '', k: k ? { name: k.name, grade: k.grade } : undefined, ans: { r: rd.id, t: rd.t, mc: ans.mc, op: ans.op, at: ans.at } }));
+    const msg = `התשובות של ${k ? k.name : ''} לקטע "${rd.t}" 📝\nאבא: להעתיק את כל ההודעה ולהדביק באפליקציה ב-Claude ← קטעי קריאה ← בדיקת תשובות\n${link}`;
+    app.append(h('div', { class: 'card center' },
+      h('h2', {}, `אמריקאיות: ${ok} מתוך ${rd.mc.length} נכונות`),
+      h('p', { class: 'sub' }, 'את השאלות הפתוחות אבא ו-Claude יבדקו. שלחי לאבא את התשובות, וכשהמשוב יחזור לחצי על הקישור שתקבלי.'),
+      h('div', { class: 'share' },
+        h('a', { class: 'btn ok', href: 'https://wa.me/?text=' + encodeURIComponent(msg), target: '_blank', rel: 'noopener' }, '📤 שליחה לאבא'),
+        h('button', { class: 'btn sec', onclick: async () => { try { if (navigator.share) { await navigator.share({ text: msg }); return; } } catch { return; } try { await navigator.clipboard.writeText(msg); toast('הועתק'); } catch { toast('לא הצלחנו להעתיק'); } } }, 'שיתוף / העתקה'))));
+  }
 }
 
 /* ---------- spelling: the Hebrew word is shown, she writes the English ---------- */

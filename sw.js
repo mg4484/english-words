@@ -1,5 +1,5 @@
 // Offline support: app files are cached; the page itself updates when online.
-const CACHE = 'words-v6';
+const CACHE = 'words-v7';
 const CORE = ['./', 'index.html', 'manifest.webmanifest', 'lz-string.min.js', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
