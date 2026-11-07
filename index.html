@@ -289,8 +289,9 @@ function encodePack(words, name, kid) {
 }
 function checkHash() {
   if (!/pack=/.test(location.hash)) return;
-  try { S.pack = decodePack(location.hash); S.view = 'import'; }
-  catch { toast('הקישור לא תקין'); }
+  try { S.pack = decodePack(location.hash); S.packErr = false; }
+  catch { S.pack = null; S.packErr = true; }
+  S.view = 'import';
   try { history.replaceState(null, '', location.pathname + location.search); } catch { }
 }
 window.addEventListener('hashchange', () => { checkHash(); render(); });
@@ -307,6 +308,7 @@ function go(view) { S.view = view; P = null; Q = null; SEN = null; preview = nul
 $('#back').onclick = () => go('home');
 function render() {
   if (!S.kids.length && S.view !== 'import') S.view = 'kids';
+  if (S.view === 'import' && !S.pack && !S.packErr) S.view = S.kids.length ? 'home' : 'kids';
   $('#title').textContent = TITLES[S.view];
   $('#back').hidden = S.view === 'home' || !S.kids.length;
   $('#count').textContent = `${S.words.length} מילים`;
@@ -386,6 +388,13 @@ function vKids(app) {
 /* ---------- import a pack ---------- */
 function vImport(app) {
   const p = S.pack;
+  if (S.packErr) {
+    app.append(h('div', { class: 'card center' }, h('div', { class: 'gift' }, '😕'),
+      h('h2', {}, 'הקישור הגיע חתוך'),
+      h('p', { class: 'sub' }, 'כנראה שהקישור היה ארוך מדי ונחתך בדרך, ולכן המילים לא נכנסו. בקשו מאבא לשלוח שוב. בגרסה החדשה הקישורים קצרים יותר.'),
+      h('button', { class: 'btn block', onclick: () => { S.packErr = false; S.view = S.kids.length ? 'home' : 'kids'; render(); } }, 'הבנתי')));
+    return;
+  }
   if (!p) { go('home'); return; }
   const items = p.w.filter(x => Array.isArray(x) && typeof x[0] === 'string' && x[0].trim() && x[1]);
   const pk = p.k && String(p.k.name || '').trim() ? { name: String(p.k.name).trim(), grade: GRADES[p.k.grade] ? p.k.grade : 'ה' } : null;
@@ -400,6 +409,7 @@ function vImport(app) {
   app.append(h('div', { class: 'card center' },
     h('div', { class: 'gift' }, '🎁'),
     h('h2', {}, `${p.n ? p.n + ' שלח/ה' : 'קיבלת'} ${items.length} מילים${pk ? ' ל' + pk.name : ''}`),
+    Array.isArray(p.p) ? h('div', { class: 'pill', style: 'display:inline-block;margin-bottom:6px' }, `חלק ${p.p[0]} מתוך ${p.p[1]}`) : null,
     h('p', { class: 'sub' }, fresh === items.length ? 'כולן חדשות!' : `${fresh} חדשות, השאר כבר קיימות ויתעדכנו`),
     h('div', { style: 'text-align:right' },
       h('label', { class: 'lbl' }, 'למי להוסיף?'),
@@ -426,7 +436,8 @@ function vImport(app) {
           upsert({ id: wordId(en), en: en.trim(), he: String(he).trim(), addedAt: ex0?.addedAt || Date.now() + n, right: ex0?.right || 0, wrong: ex0?.wrong || 0, ...(Array.isArray(ex) && ex.length ? { ex } : {}) });
           n++;
         }
-        save(); S.pack = null; toast(`נוספו ${n} מילים ל${curKid().name}! 🎉`); go('home');
+        const part = Array.isArray(p.p) && p.p[0] < p.p[1] ? ` · עכשיו פתחו את חלק ${p.p[0] + 1}` : '';
+        save(); S.pack = null; toast(`נוספו ${n} מילים ל${curKid().name}! 🎉${part}`); go('home');
       } }, 'הוספה למילים שלי'))));
 }
 
