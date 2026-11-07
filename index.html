@@ -751,11 +751,34 @@ function vImportReading(app, p) {
         S.pack = null; S.readId = rd.id; go('read');
       } }, 'לקטע ←'))));
 }
+// all answers that weren't checked yet go to Dad in one small file
+async function sendAnswersToDad() {
+  const k = curKid(); if (!k) return;
+  const list = getReads().filter(r => r.ans && !r.fb);
+  if (!list.length) return toast('אין תשובות שמחכות לבדיקה');
+  const base = location.origin + location.pathname + '#pack=';
+  const body = list.map(r => r.rd.t + '\n' + base + LZString.compressToEncodedURIComponent(JSON.stringify({ v: 1, n: k.name, k: { name: k.name, grade: k.grade }, ans: { r: r.rd.id, t: r.rd.t, mc: r.ans.mc, op: r.ans.op, at: r.ans.at } }))).join('\n\n');
+  const text = `התשובות של ${k.name} (${list.length} קטעים)\nאבא: באפליקציה ב-Claude ← קטעי קריאה ← בדיקת תשובות ← בחירת קובץ\n\n${body}\n`;
+  const d = new Date(), fname = `answers-${k.name}-${d.getDate()}.${d.getMonth() + 1}-${d.getHours()}${String(d.getMinutes()).padStart(2, '0')}.txt`;
+  const file = new File([text], fname, { type: 'text/plain' });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'תשובות לאבא' }); return; }
+  } catch (e) { if (e && e.name === 'AbortError') return; }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = fname; document.body.append(a); a.click(); a.remove();
+  toast('הקובץ נשמר בהורדות. שלחי אותו לאבא בוואטסאפ');
+}
 function vImportFeedback(app, p) {
-  const fb = p.fb;
+  const fbs = Array.isArray(p.fb) ? p.fb : [p.fb];
   const kid = (p.k && S.kids.find(k => k.name === String(p.k.name || '').trim())) || curKid();
   const list = kid ? getReads(kid.id) : [];
-  const it = list.find(r => r.rd.id === fb.r);
+  const hits = fbs.filter(f => f && list.some(r => r.rd.id === f.r));
+  if (hits.length > 1) {
+    hits.forEach(f => { list.find(r => r.rd.id === f.r).fb = f; });
+    setReads(list, kid.id); useKid(kid.id); S.pack = null;
+    toast(`הגיעו ${hits.length} משובים מאבא! ⭐`); go('readings'); return;
+  }
+  const fb = hits[0] || fbs[0];
+  const it = fb && list.find(r => r.rd.id === fb.r);
   if (!it) {
     app.append(h('div', { class: 'card center' }, h('div', { class: 'gift' }, '🤔'),
       h('h2', {}, 'לא מצאנו את הקטע הזה'), h('p', { class: 'sub' }, 'המשוב שייך לקטע שלא נמצא בטלפון הזה.'),
@@ -771,6 +794,9 @@ function vReadings(app) {
   const ask = 'https://wa.me/?text=' + encodeURIComponent(`אבא, אפשר קטע קריאה חדש באנגלית? 📖 (${k ? k.name : ''})`);
   app.append(h('a', { class: 'btn acc block', style: 'margin-bottom:14px', href: ask, target: '_blank', rel: 'noopener' }, '📩 בקשת קטע חדש מאבא'));
   if (!list.length) { app.append(h('div', { class: 'card empty' }, h('span', { class: 'em' }, '📖'), 'עוד אין קטעי קריאה. אבא שולח אותם בקישור.')); return; }
+  const pend = list.filter(r => r.ans && !r.fb).length;
+  if (pend) app.append(h('div', { class: 'card center' }, h('p', { class: 'sub', style: 'margin:0 0 10px' }, `יש ${pend} קטעים עם תשובות שמחכות לבדיקה של אבא`),
+    h('button', { class: 'btn ok block', onclick: sendAnswersToDad }, '📎 שליחת התשובות לאבא')));
   const status = r => r.fb ? h('span', { class: 'badge ' + (r.fb.sc >= 80 ? 'ok' : r.fb.sc >= 55 ? 'mid' : 'bad') }, `⭐ ${r.fb.sc}%`)
     : r.ans ? h('span', { class: 'badge mid' }, 'ממתין לבדיקה') : h('span', { class: 'badge ok' }, 'חדש');
   app.append(h('div', { class: 'card' }, h('ul', { class: 'wlist rlist' }, list.map(r => h('li', { class: 'witem', onclick: () => { S.readId = r.rd.id; go('read'); } },
@@ -853,10 +879,9 @@ function vRead(app) {
     const msg = `התשובות של ${k ? k.name : ''} לקטע "${rd.t}" 📝\nאבא: להעתיק את כל ההודעה ולהדביק באפליקציה ב-Claude ← קטעי קריאה ← בדיקת תשובות\n${link}`;
     app.append(h('div', { class: 'card center' },
       h('h2', {}, `אמריקאיות: ${ok} מתוך ${rd.mc.length} נכונות`),
-      h('p', { class: 'sub' }, 'את השאלות הפתוחות אבא ו-Claude יבדקו. שלחי לאבא את התשובות, וכשהמשוב יחזור לחצי על הקישור שתקבלי.'),
-      h('div', { class: 'share' },
-        h('a', { class: 'btn ok', href: 'https://wa.me/?text=' + encodeURIComponent(msg), target: '_blank', rel: 'noopener' }, '📤 שליחה לאבא'),
-        h('button', { class: 'btn sec', onclick: async () => { try { if (navigator.share) { await navigator.share({ text: msg }); return; } } catch { return; } try { await navigator.clipboard.writeText(msg); toast('הועתק'); } catch { toast('לא הצלחנו להעתיק'); } } }, 'שיתוף / העתקה'))));
+      h('p', { class: 'sub' }, 'את השאלות הפתוחות אבא ו-Claude יבדקו. שלחי לאבא את התשובות. אפשר גם לענות קודם על עוד קטעים ולשלוח הכל ביחד. כשהמשוב יחזור, לחצי על הקישור שתקבלי.'),
+      h('button', { class: 'btn ok block', onclick: sendAnswersToDad }, '📎 שליחת התשובות לאבא (קובץ)'),
+      h('a', { class: 'btn sec block', style: 'margin-top:10px', href: 'https://wa.me/?text=' + encodeURIComponent(msg), target: '_blank', rel: 'noopener' }, 'או: שליחה כהודעה')));
   }
 }
 
