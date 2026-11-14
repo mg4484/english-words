@@ -188,6 +188,29 @@ function speak(text) {
     synth.cancel(); synth.speak(u);
   } catch { }
 }
+// long text: one sentence at a time (long utterances get cut on some phones); onDone fires when it ends or is stopped
+function speakLong(text, onDone) {
+  try {
+    const synth = window.speechSynthesis; if (!synth) { toast('ההשמעה לא נתמכת במכשיר הזה'); onDone && onDone(); return; }
+    const vs = synth.getVoices();
+    const v = vs.find(v => /^en[-_]US/i.test(v.lang)) || vs.find(v => /^en/i.test(v.lang));
+    const parts = (String(text).match(/[^.!?\n]+[.!?]*["”']?/g) || [text]).map(x => x.trim()).filter(Boolean);
+    synth.cancel();
+    let fired = false; const fin = () => { if (!fired) { fired = true; onDone && onDone(); } };
+    parts.forEach((p, i) => {
+      const u = new SpeechSynthesisUtterance(p); u.lang = 'en-US'; u.rate = 0.85; if (v) u.voice = v;
+      u.onerror = fin; if (i === parts.length - 1) u.onend = fin;
+      synth.speak(u);
+    });
+  } catch { onDone && onDone(); }
+}
+function readAloudBtn(text) {
+  let on = false;
+  const sb = h('button', { class: 'speak', type: 'button' }, '🔊 הקראת הקטע');
+  const off = () => { on = false; sb.textContent = '🔊 הקראת הקטע'; };
+  sb.onclick = () => { if (on) { try { speechSynthesis.cancel(); } catch { } off(); return; } on = true; sb.textContent = '⏹ עצירה'; speakLong(text, off); };
+  return sb;
+}
 try { window.speechSynthesis && speechSynthesis.getVoices(); } catch {}
 const speakBtn = (text, label = 'הקשב') => h('button', { class: 'speak', type: 'button', onclick: () => speak(text) }, '🔊 ', label);
 function loadScript(src) {
@@ -283,11 +306,17 @@ function pickWords(n, excludeId, pool) {
   }
   return out;
 }
-function distractors(w, n, field) {
+const FAMILIES = ['january february march april may june july august september october november december', 'sunday monday tuesday wednesday thursday friday saturday',
+  'one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred thousand',
+  'i you he she it we they', 'my your his her its our their', 'me him us them', 'this that these those', 'spring summer autumn fall winter', 'red blue green yellow black white orange pink purple brown grey gray']
+  .map(x => new Set(x.split(' ')));
+const famOf = en => { const k = normEn(en).replace(/^a /, ''); return FAMILIES.find(f => f.has(k)) || null; };
+function distractors(w, n, field, noRivals) {
+  const fam = noRivals ? famOf(w.en) : null;
   const seen = new Set([field === 'he' ? normHe(heAlts(w.he)[0]) : normEn(w.en)]);
   const out = [];
   for (const x of shuffle(S.words)) {
-    if (x.id === w.id) continue;
+    if (x.id === w.id || (fam && famOf(x.en) === fam)) continue;
     const val = field === 'he' ? x.he.split(/[,;\/]/)[0].trim() : x.en;
     const key = field === 'he' ? normHe(val) : normEn(val);
     if (seen.has(key)) continue; seen.add(key); out.push(val);
@@ -802,7 +831,6 @@ function vReadings(app) {
   app.append(h('div', { class: 'card' }, h('ul', { class: 'wlist rlist' }, list.map(r => h('li', { class: 'witem', onclick: () => { S.readId = r.rd.id; go('read'); } },
     h('div', { class: 'w' }, h('b', { class: 'en' }, r.rd.t), h('span', {}, r.rd.th || '')), status(r))))));
 }
-let speaking = false;
 function vRead(app) {
   const list = getReads(), it = list.find(r => r.rd.id === S.readId);
   if (!it) { go('readings'); return; }
@@ -816,10 +844,7 @@ function vRead(app) {
     const w = bank.get(tok.toLowerCase());
     return w ? h('span', { class: 'hl', onclick: () => { speak(w.en); toast(`${w.en} = ${w.he}`); } }, tok) : tok;
   }));
-  const sb = h('button', { class: 'speak', onclick: () => {
-    if (speaking) { speechSynthesis.cancel(); speaking = false; sb.textContent = '🔊 הקראת הקטע'; return; }
-    speak(rd.x); speaking = true; sb.textContent = '⏹ עצירה';
-  } }, '🔊 הקראת הקטע');
+  const sb = readAloudBtn(rd.x);
   app.append(h('div', { class: 'card' },
     it.fb ? h('div', { class: 'fb ' + (it.fb.sc >= 60 ? 'ok' : 'bad'), style: 'margin:0 0 14px' }, `ציון: ${it.fb.sc}%`, it.fb.o ? h('span', { style: 'display:block;font-weight:500;margin-top:4px' }, it.fb.o) : null) : null,
     h('h2', { class: 'en', style: 'text-align:left' }, rd.t), rd.th ? h('p', { class: 'sub', style: 'margin:-6px 0 8px' }, rd.th) : null,
@@ -1029,7 +1054,7 @@ function vSentences(app) {
     h('div', { class: 'qlabel' }, 'איזו מילה חסרה?'),
     h('div', { class: 'sentence en', dir: 'ltr' }, pre, blank, post));
   const grid = h('div', { class: 'opts' }), area = h('div');
-  shuffle([w.en, ...distractors(w, 3, 'en')]).forEach(o => grid.append(h('button', { class: 'opt en', dir: 'ltr', onclick: e => {
+  shuffle([w.en, ...distractors(w, 3, 'en', true)]).forEach(o => grid.append(h('button', { class: 'opt en', dir: 'ltr', onclick: e => {
     const ok = normEn(o) === normEn(w.en);
     grid.querySelectorAll('button').forEach(b => { b.disabled = true; if (normEn(b.textContent) === normEn(w.en)) b.classList.add('ok'); });
     if (!ok) e.currentTarget.classList.add('bad');
@@ -1059,7 +1084,7 @@ function senQuestion(area, w, finish) {
   const pre = s.slice(0, cut), post = s.slice(cut + 3);
   const blank = h('span', { class: 'blank' }, '?');
   const grid = h('div', { class: 'opts' });
-  shuffle([w.en, ...distractors(w, 3, 'en')]).forEach(o => grid.append(h('button', { class: 'opt en', dir: 'ltr', onclick: e => {
+  shuffle([w.en, ...distractors(w, 3, 'en', true)]).forEach(o => grid.append(h('button', { class: 'opt en', dir: 'ltr', onclick: e => {
     const ok = normEn(o) === normEn(w.en);
     grid.querySelectorAll('button').forEach(b => { b.disabled = true; if (normEn(b.textContent) === normEn(w.en)) b.classList.add('ok'); });
     if (!ok) e.currentTarget.classList.add('bad');
@@ -1071,8 +1096,7 @@ function senQuestion(area, w, finish) {
   area.append(h('div', { class: 'qlabel' }, 'איזו מילה חסרה?'), h('div', { class: 'sentence en', dir: 'ltr' }, pre, blank, post), grid);
 }
 function testReadingQ(area, rd, onSubmit, next) {
-  let speakingT = false;
-  const sb = h('button', { class: 'speak', onclick: () => { if (speakingT) { speechSynthesis.cancel(); speakingT = false; sb.textContent = '🔊 הקראת הקטע'; return; } speak(rd.x); speakingT = true; sb.textContent = '⏹ עצירה'; } }, '🔊 הקראת הקטע');
+  const sb = readAloudBtn(rd.x);
   const ans = { mc: rd.mc.map(() => null), op: rd.op.map(() => '') };
   const mcBoxes = [], opBoxes = [];
   area.append(h('h2', { class: 'en', style: 'text-align:left;margin-top:6px' }, rd.t), h('div', { style: 'margin-bottom:8px' }, sb), h('div', { class: 'passage' }, rd.x));
